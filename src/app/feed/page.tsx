@@ -117,7 +117,7 @@ export default async function FeedPage() {
                 content: comment.content,
                 authorName:
                   commentAuthor?.display_name ||
-                  commentAuthor?.username 
+                  commentAuthor?.username || "Plant owner"
               };
             });
 
