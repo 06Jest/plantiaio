@@ -1,4 +1,4 @@
-"use server";
+
 
 import Link from "next/link";
 
@@ -117,8 +117,7 @@ export default async function FeedPage() {
                 content: comment.content,
                 authorName:
                   commentAuthor?.display_name ||
-                  commentAuthor?.username ||
-                  "Plant owner",
+                  commentAuthor?.username 
               };
             });
 

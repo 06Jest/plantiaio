@@ -159,6 +159,20 @@ export function SelectedNotePanel({ note }: { note: NoteWithActions }) {
             </span>
           )}
 
+          {note.aiAnalysis && (
+            <section className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-stone-800">
+                  AI care insight
+                </span>
+              </div>
+
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-600">
+                {note.aiAnalysis}
+              </p>
+            </section>
+          )}
+
           <form
             action={note.deleteAction}
             onSubmit={(e) => {

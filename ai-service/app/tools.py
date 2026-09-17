@@ -1,7 +1,22 @@
-from fastapi import HTTPException
-
 from .schemas import ToolInvocation, ToolResult
 from .security import RlsClient
+
+
+async def user_owns_plant(
+    plant_id: str,
+    db: RlsClient,
+) -> bool:
+    rows = await db.request(
+        "GET",
+        "plants",
+        params={
+            "select": "id",
+            "id": f"eq.{plant_id}",
+            "limit": "1",
+        },
+    )
+
+    return bool(rows)
 
 
 async def run_tool(
@@ -10,40 +25,81 @@ async def run_tool(
 ) -> ToolResult:
     args = invocation.arguments
 
-    # --------------------------------------------------
-    # Search notes
-    # --------------------------------------------------
+    # ---------------------------------------------------------
+    # Search saved notes
+    # ---------------------------------------------------------
     if invocation.name == "search_notes":
         query = str(args.get("query", "")).strip()
+        plant_id = str(args.get("plant_id", "")).strip()
 
-        if not query or len(query) > 200:
+        if len(query) > 200:
             return ToolResult(
                 status="error",
-                message="A short note search query is required.",
+                message="The note search query must be 200 characters or fewer.",
             )
 
-        sanitized_query = query.replace("%", "").replace("*", "")
+        params = {
+            "select": "id,plant_id,current_content,created_at",
+            "limit": "20",
+            "order": "created_at.desc",
+        }
+
+        if query:
+            sanitized_query = (
+                query
+                .replace("%", "")
+                .replace("*", "")
+                .replace(",", "")
+            )
+
+            params["current_content"] = f"ilike.*{sanitized_query}*"
+
+        if plant_id:
+            plant_rows = await db.request(
+                "GET",
+                "plants",
+                params={
+                    "select": "id,name",
+                    "id": f"eq.{plant_id}",
+                    "limit": "1",
+                },
+            )
+
+            if not plant_rows:
+                return ToolResult(
+                    status="error",
+                    message="Plant not found or not owned by the current user.",
+                )
+
+            plant_name = plant_rows[0]["name"]
+
+            params["plant_id"] = f"eq.{plant_id}"
 
         rows = await db.request(
             "GET",
             "notes",
-            params={
-                "select": "id,plant_id,current_content,created_at",
-                "current_content": f"ilike.*{sanitized_query}*",
-                "limit": "20",
-            },
+            params=params,
         )
 
         return ToolResult(
             status="ok",
-            data=rows,
+            data={
+                "plant_name": plant_name,
+                "note": result,
+            },
         )
 
-    # --------------------------------------------------
+    # ---------------------------------------------------------
     # Get plant details
-    # --------------------------------------------------
+    # ---------------------------------------------------------
     if invocation.name == "get_plant_details":
-        plant_id = str(args.get("plant_id", ""))
+        plant_id = str(args.get("plant_id", "")).strip()
+
+        if not plant_id:
+            return ToolResult(
+                status="error",
+                message="A plant ID is required.",
+            )
 
         rows = await db.request(
             "GET",
@@ -55,16 +111,28 @@ async def run_tool(
             },
         )
 
+        if not rows:
+            return ToolResult(
+                status="error",
+                message="Plant not found.",
+            )
+
         return ToolResult(
             status="ok",
-            data=rows,
+            data=rows[0],
         )
 
-    # --------------------------------------------------
-    # Summarize plant history
-    # --------------------------------------------------
+    # ---------------------------------------------------------
+    # Summarize plant care history
+    # ---------------------------------------------------------
     if invocation.name == "summarize_plant_history":
-        plant_id = str(args.get("plant_id", ""))
+        plant_id = str(args.get("plant_id", "")).strip()
+
+        if not plant_id:
+            return ToolResult(
+                status="error",
+                message="A plant ID is required.",
+            )
 
         plant = await db.request(
             "GET",
@@ -113,45 +181,58 @@ async def run_tool(
             },
         )
 
-    # --------------------------------------------------
-    # Create task
-    # --------------------------------------------------
-    if invocation.name == "create_task":
-        title = str(args.get("title", "")).strip()
-        plant_id = args.get("plant_id")
+    # ---------------------------------------------------------
+    # Create a note
+    # ---------------------------------------------------------
+    if invocation.name == "create_note":
+        content = str(args.get("content", "")).strip()
+        plant_id = str(args.get("plant_id", "")).strip()
 
-        if not title or len(title) > 200:
+        if not content:
             return ToolResult(
                 status="error",
-                message="A task title of 1–200 characters is required.",
+                message="Note content is required.",
+            )
+
+        if len(content) > 4000:
+            return ToolResult(
+                status="error",
+                message="Note content must be 4000 characters or fewer.",
+            )
+
+        if not plant_id:
+            return ToolResult(
+                status="error",
+                message="A plant ID is required.",
+            )
+
+        if not await user_owns_plant(plant_id, db):
+            return ToolResult(
+                status="error",
+                message="Plant not found or not owned by the current user.",
             )
 
         if not invocation.confirmed:
             return ToolResult(
                 status="confirmation_required",
                 data={
-                    "title": title,
                     "plant_id": plant_id,
+                    "content": content,
                 },
-                message="Confirm before creating this task.",
+                message="Confirm before creating this note.",
             )
 
         payload = {
             "owner_id": db.user_id,
-            "title": title,
+            "plant_id": plant_id,
+            "original_content": content,
+            "current_content": content,
         }
-
-        if plant_id:
-            payload["plant_id"] = str(plant_id)
-
-        if args.get("due_at"):
-            payload["due_at"] = str(args["due_at"])
 
         result = await db.request(
             "POST",
-            "plant_tasks",
+            "notes",
             headers={
-                **db.headers,
                 "Prefer": "return=representation",
             },
             json=payload,
@@ -162,10 +243,7 @@ async def run_tool(
             data=result,
         )
 
-    # --------------------------------------------------
-    # Unsupported tool
-    # --------------------------------------------------
-    raise HTTPException(
-        status_code=400,
-        detail="Unsupported tool.",
+    return ToolResult(
+        status="error",
+        message=f"Unsupported tool: {invocation.name}",
     )

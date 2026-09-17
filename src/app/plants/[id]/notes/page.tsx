@@ -22,26 +22,29 @@ export default async function NotesPage({ params }: { params: Promise<{ id: stri
   if (!user) redirect("/login");
 
   const [{ data: plant }, { data: notes }] = await Promise.all([
-    supabase.from("plants").select("id, name").eq("id", id).single(),
-    supabase
-      .from("notes")
-      .select("id, original_content, current_content, created_at, updated_at")
-      .eq("plant_id", id)
-      .order("created_at", { ascending: false }),
-  ]);
+  supabase.from("plants").select("id, name").eq("id", id).single(),
+  supabase
+    .from("notes")
+    .select(
+      "id, original_content, current_content, created_at, updated_at, ai_analysis",
+    )
+    .eq("plant_id", id)
+    .order("created_at", { ascending: false }),
+]);
 
-  if (!plant) notFound();
+if (!plant) notFound();
 
-  const notesWithActions: NoteWithActions[] = (notes ?? []).map((note) => ({
-    id: note.id,
-    originalContent: note.original_content,
-    currentContent: note.current_content,
-    createdAt: note.created_at,
-    updatedAt: note.updated_at,
-    updateAction: updateNote.bind(null, id, note.id),
-    deleteAction: deleteNote.bind(null, id, note.id),
-    publishAction: publishNote.bind(null, id, note.id),
-  }));
+const notesWithActions: NoteWithActions[] = (notes ?? []).map((note) => ({
+  id: note.id,
+  originalContent: note.original_content,
+  currentContent: note.current_content,
+  createdAt: note.created_at,
+  updatedAt: note.updated_at,
+  aiAnalysis: note.ai_analysis,
+  updateAction: updateNote.bind(null, id, note.id),
+  deleteAction: deleteNote.bind(null, id, note.id),
+  publishAction: publishNote.bind(null, id, note.id),
+}));
 
   return (
     <main className="min-h-screen bg-stone-50">

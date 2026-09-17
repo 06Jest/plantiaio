@@ -14,6 +14,12 @@ type Reply = {
     slug: string;
     excerpt: string;
   }[];
+  confirmation_required?: boolean;
+  tool_name?: string;
+  tool_arguments?: {
+    plant_id?: string;
+    content?: string;
+  };
 };
 
 type ChatMessage =
@@ -29,9 +35,11 @@ type ChatMessage =
     };
 
 const suggestions = [
-  "My basil has yellow leaves. What should I check?",
-  "How often should I water my snake plant?",
-  "What are the signs of overwatering?",
+  "Tell me about my [plant name].",
+  "What notes do I have about my [plant name]?",
+  "Summarize the care history of my [plant name].",
+  "Create a note for my [plant name]: I watered it today.",
+  "My [plant name] has yellow leaves. What should I check?",
 ];
 
 const MAX_MESSAGE_LENGTH = 4000;
@@ -125,10 +133,57 @@ function MarkdownAnswer({ content }: { content: string }) {
   );
 }
 
-function AssistantReply({ reply }: { reply: Reply }) {
+function AssistantReply({
+  reply,
+  onConfirm,
+  onCancel,
+  confirming,
+}: {
+  reply: Reply;
+  onConfirm?: () => void;
+  onCancel?: () => void;
+  confirming?: boolean;
+}) {
+  const isConfirmationRequired =
+    reply.confirmation_required &&
+    reply.tool_name === "create_note" &&
+    reply.tool_arguments?.content;
+
   return (
     <div className="rounded-2xl rounded-tl-md bg-white px-4 py-4 shadow-sm ring-1 ring-stone-200">
       <MarkdownAnswer content={reply.answer} />
+
+      {isConfirmationRequired && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-semibold text-amber-900">
+            Note to save
+          </p>
+
+          <p className="mt-1 rounded-lg bg-white/70 p-2 text-sm text-amber-950">
+            {reply.tool_arguments?.content}
+          </p>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={confirming}
+              className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {confirming ? "Saving..." : "Confirm and save"}
+            </button>
+
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={confirming}
+              className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {reply.warning && (
         <div className="mt-4 flex gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800">
@@ -168,65 +223,140 @@ export function AiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] =
+  useState<{
+    reply: Reply;
+    plantId: string;
+    content: string;
+  } | null>(null);
+
+  const testPlantId =
+    "c27adea8-9ae5-4d39-b367-541f93f22cc5";
+
+  async function sendMessage(
+    userMessage: string,
+    confirmed = false,
+  ) {
+    const {
+      data: { session },
+    } = await createClient().auth.getSession();
+
+    if (!session) {
+      throw new Error("Please log in first.");
+    }
+
+    const aiServiceUrl =
+      process.env.NEXT_PUBLIC_AI_SERVICE_URL;
+
+    if (!aiServiceUrl) {
+      throw new Error("The AI service URL is not configured.");
+    }
+
+    const response = await fetch(`${aiServiceUrl}/v1/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        message: userMessage,
+        plant_id: testPlantId,
+        confirmed,
+      }),
+    });
+
+  if (!response.ok) {
+    throw new Error(
+      "The plant expert could not respond right now.",
+    );
+  }
+
+  return (await response.json()) as Reply;
+}
 
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  event.preventDefault();
 
-    const trimmedMessage = message.trim();
+  const trimmedMessage = message.trim();
 
-    if (!trimmedMessage || loading) return;
+  if (!trimmedMessage || loading) return;
 
-    const userMessage: ChatMessage = {
+  const userMessage: ChatMessage = {
+    id: createMessageId(),
+    role: "user",
+    content: trimmedMessage,
+  };
+
+  setMessages((previousMessages) => [
+    ...previousMessages,
+    userMessage,
+  ]);
+
+  setMessage("");
+  setLoading(true);
+  setError(null);
+
+  try {
+    const reply = await sendMessage(trimmedMessage);
+
+    const assistantMessage: ChatMessage = {
       id: createMessageId(),
-      role: "user",
-      content: trimmedMessage,
+      role: "assistant",
+      reply,
     };
 
     setMessages((previousMessages) => [
       ...previousMessages,
-      userMessage,
+      assistantMessage,
     ]);
 
-    setMessage("");
+    if (
+    reply.confirmation_required &&
+    reply.tool_name === "create_note" &&
+    reply.tool_arguments?.plant_id &&
+    reply.tool_arguments?.content
+  ) {
+    setPendingConfirmation({
+      reply,
+      plantId: reply.tool_arguments.plant_id,
+      content: reply.tool_arguments.content,
+    });
+  } else {
+    setPendingConfirmation(null);
+  }
+  } catch (cause) {
+    setError(
+      cause instanceof Error
+        ? cause.message
+        : "Unexpected error.",
+    );
+  } finally {
+    setLoading(false);
+  }
+}
+
+  function handleSuggestion(suggestion: string) {
+    setMessage(suggestion);
+  }
+
+  const showEmptyState =
+    messages.length === 0 && !loading && !error;
+
+  async function confirmPendingNote() {
+    if (!pendingConfirmation || loading) return;
+
+    const { content, plantId } = pendingConfirmation;
+
+    if (!content || !plantId) return;
+
     setLoading(true);
     setError(null);
 
     try {
-      const {
-        data: { session },
-      } = await createClient().auth.getSession();
-
-      if (!session) {
-        throw new Error("Please log in first.");
-      }
-
-      const aiServiceUrl =
-        process.env.NEXT_PUBLIC_AI_SERVICE_URL;
-
-      if (!aiServiceUrl) {
-        throw new Error(
-          "The AI service URL is not configured.",
-        );
-      }
-
-      const response = await fetch(`${aiServiceUrl}/v1/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          message: trimmedMessage,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          "The plant expert could not respond right now.",
-        );
-      }
-
-      const reply: Reply = await response.json();
+      const reply = await sendMessage(
+        `Save this note exactly: ${content}`,
+        true,
+      );
 
       const assistantMessage: ChatMessage = {
         id: createMessageId(),
@@ -238,6 +368,8 @@ export function AiChat() {
         ...previousMessages,
         assistantMessage,
       ]);
+
+      setPendingConfirmation(null);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -249,12 +381,26 @@ export function AiChat() {
     }
   }
 
-  function handleSuggestion(suggestion: string) {
-    setMessage(suggestion);
-  }
+function cancelPendingNote() {
+  if (loading) return;
 
-  const showEmptyState =
-    messages.length === 0 && !loading && !error;
+  setPendingConfirmation(null);
+
+  const cancellationReply: Reply = {
+    answer: "The note was not saved.",
+    provider: "none",
+    sources: [],
+  };
+
+  setMessages((previousMessages) => [
+    ...previousMessages,
+    {
+      id: createMessageId(),
+      role: "assistant",
+      reply: cancellationReply,
+    },
+  ]);
+}
 
   return (
     <section className="mt-8 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
@@ -349,7 +495,20 @@ export function AiChat() {
                       Plant Expert
                     </p>
 
-                    <AssistantReply reply={chatMessage.reply} />
+                    <AssistantReply
+                      reply={chatMessage.reply}
+                      onConfirm={
+                        pendingConfirmation?.reply === chatMessage.reply
+                          ? confirmPendingNote
+                          : undefined
+                      }
+                      onCancel={
+                        pendingConfirmation?.reply === chatMessage.reply
+                          ? cancelPendingNote
+                          : undefined
+                      }
+                      confirming={loading}
+                    />
                   </div>
                 </div>
               );

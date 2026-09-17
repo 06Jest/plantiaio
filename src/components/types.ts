@@ -4,6 +4,7 @@ export type NoteWithActions = {
   currentContent: string;
   createdAt: string;
   updatedAt: string;
+  aiAnalysis: string | null;
   updateAction: (formData: FormData) => void | Promise<void>;
   deleteAction: (formData: FormData) => void | Promise<void>;
   publishAction: (formData: FormData) => void | Promise<void>;
