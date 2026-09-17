@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Plant Tracker",
-  description: "Private, owner-controlled plant care tracking."
+  title: "Plantiaio",
+  description: "A plant community for sharing plant notes, tracking plants, getting AI-assisted care insights, and exploring plant guides."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
