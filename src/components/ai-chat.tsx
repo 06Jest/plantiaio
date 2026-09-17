@@ -250,7 +250,7 @@ export function AiChat() {
     const { data, error } = await supabase
       .from("plants")
       .select("id, name")
-      .eq("user_id", user.id)
+      .eq("owner", user.id)
       .order("name");
 
     if (error) {
