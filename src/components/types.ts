@@ -9,3 +9,8 @@ export type NoteWithActions = {
   deleteAction: (formData: FormData) => void | Promise<void>;
   publishAction: (formData: FormData) => void | Promise<void>;
 };
+
+export type Plant = {
+  id: string;
+  name: string;
+};

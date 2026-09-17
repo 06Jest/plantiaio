@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createClient } from "@/lib/supabase/client";
+import { Plant } from "./types";
+import { FormEvent, useEffect, useState } from "react";
 
 type Reply = {
   answer: string;
@@ -223,6 +224,9 @@ export function AiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [plants, setPlants] = useState<Plant[]>([]);
+  const [selectedPlantId, setSelectedPlantId] = useState("");
+  const [plantsLoading, setPlantsLoading] = useState(true);
   const [pendingConfirmation, setPendingConfirmation] =
   useState<{
     reply: Reply;
@@ -230,12 +234,42 @@ export function AiChat() {
     content: string;
   } | null>(null);
 
-  const testPlantId =
-    "c27adea8-9ae5-4d39-b367-541f93f22cc5";
+  useEffect(() => {
+  async function loadPlants() {
+    const supabase = createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setPlantsLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("plants")
+      .select("id, name")
+      .eq("user_id", user.id)
+      .order("name");
+
+    if (error) {
+      console.error("Failed to load plants:", error);
+      setPlantsLoading(false);
+      return;
+    }
+
+    setPlants(data ?? []);
+    setPlantsLoading(false);
+  }
+
+  loadPlants();
+}, []);
 
   async function sendMessage(
     userMessage: string,
     confirmed = false,
+    plantId = selectedPlantId,
   ) {
     const {
       data: { session },
@@ -252,17 +286,19 @@ export function AiChat() {
       throw new Error("The AI service URL is not configured.");
     }
 
+    const requestBody = {
+      message: userMessage,
+      confirmed,
+      ...(plantId ? { plant_id: plantId } : {}),
+    };
+
     const response = await fetch(`${aiServiceUrl}/v1/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({
-        message: userMessage,
-        plant_id: testPlantId,
-        confirmed,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
   if (!response.ok) {
@@ -356,6 +392,7 @@ export function AiChat() {
       const reply = await sendMessage(
         `Save this note exactly: ${content}`,
         true,
+        plantId,  
       );
 
       const assistantMessage: ChatMessage = {
@@ -597,6 +634,36 @@ function cancelPendingNote() {
           </div>
 
           <div className="mt-2 flex items-center justify-between px-1">
+            <div className="border-b border-stone-100 bg-white px-5 py-4 sm:px-6">
+              <label
+                htmlFor="plant-select"
+                className="mb-2 block text-xs font-semibold text-stone-600"
+              >
+                Ask about a plant
+              </label>
+
+              <select
+                id="plant-select"
+                value={selectedPlantId}
+                onChange={(event) => setSelectedPlantId(event.target.value)}
+                disabled={plantsLoading || loading || plants.length === 0}
+                className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-700 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+              >
+                <option value="">
+                  {plantsLoading
+                    ? "Loading your plants..."
+                    : plants.length === 0
+                      ? "No plants added yet"
+                      : "Select a plant..."}
+                </option>
+
+                {plants.map((plant) => (
+                  <option key={plant.id} value={plant.id}>
+                    {plant.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <p className="text-[11px] text-stone-400">
               Plant Expert can make mistakes. Check important care
               advice.
