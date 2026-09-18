@@ -83,7 +83,7 @@ export default function AiPage() {
                         {item.title}
                       </h3>
                       <p className="mt-1 text-sm leading-5 text-stone-500">
-                        "{item.prompt}"
+                        &ldquo;{item.prompt}&rdquo;
                       </p>
                     </div>
                   </div>
